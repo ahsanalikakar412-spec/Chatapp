@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmartChat</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f2f5; color: #111; }
+    .view { display: none; height: 100%; flex-direction: column; }
+    .view.active { display: flex; }
+    header { background: #4f46e5; color: #fff; padding: 14px 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+    header .grow { flex: 1; }
+    header button { background: rgba(255,255,255,.2); color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+    button { cursor: pointer; }
+
+    /* Auth */
+    #auth { justify-content: center; align-items: center; padding: 20px; }
+    .card { background: #fff; padding: 24px; border-radius: 16px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+    .card h2 { margin: 0 0 4px; color: #4f46e5; }
+    input { padding: 12px 14px; border: 1px solid #ccc; border-radius: 10px; font-size: 16px; width: 100%; }
+    .primary { padding: 12px; border: 0; border-radius: 10px; background: #4f46e5; color: #fff; font-size: 16px; }
+    .link { background: none; border: 0; color: #4f46e5; font-size: 14px; }
+    .error { color: #c0392b; font-size: 14px; min-height: 18px; }
+
+    /* Users list */
+    #search { margin: 10px; width: calc(100% - 20px); border-radius: 20px; }
+    #users { flex: 1; overflow-y: auto; }
+    .user { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fff; border-bottom: 1px solid #eee; cursor: pointer; }
+    .user:active { background: #eef; }
+    .avatar { width: 42px; height: 42px; border-radius: 50%; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; }
+    .user small { color: #777; display: block; }
+    .empty { text-align: center; color: #888; padding: 30px 16px; }
+
+    /* Chat */
+    #messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 78%; padding: 8px 12px; border-radius: 14px; background: #fff; word-wrap: break-word; }
+    .msg.me { align-self: flex-end; background: #4f46e5; color: #fff; }
+    .msg time { display: block; opacity: .6; font-size: 10px; margin-top: 2px; text-align: right; }
+    #form { display: flex; gap: 8px; padding: 10px; background: #fff; }
+    #form input { border-radius: 20px; }
+    #form button { padding: 10px 18px; border: 0; border-radius: 20px; background: #4f46e5; color: #fff; font-size: 16px; }
+  </style>
+</head>
+<body>
+
+  <!-- AUTH PAGE -->
+  <section id="auth" class="view active">
+    <form class="card" id="authForm">
+      <h2 id="authTitle">SmartChat</h2>
+      <input id="nameInput" placeholder="Your name" autocomplete="name" />
+      <input id="emailInput" type="email" placeholder="Email" autocomplete="email" required />
+      <input id="passInput" type="password" placeholder="Password (min 6 chars)" autocomplete="current-password" required />
+      <div class="error" id="authError"></div>
+      <button class="primary" type="submit" id="authBtn">Log in</button>
+      <button class="link" type="button" id="toggleAuth">No account? Sign up</button>
+    </form>
+  </section>
+
+  <!-- USERS PAGE -->
+  <section id="home" class="view">
+    <header>
+      <span class="grow" id="meName">SmartChat</span>
+      <button id="logoutBtn">Log out</button>
+    </header>
+    <input id="search" placeholder="Search people..." />
+    <div id="users"></div>
+  </section>
+
+  <!-- CHAT PAGE -->
+  <section id="chat" class="view">
+    <header>
+      <button id="backBtn">&larr;</button>
+      <span class="grow" id="chatWith"></span>
+    </header>
+    <div id="messages"></div>
+    <form id="form">
+      <input id="text" placeholder="Type a message..." autocomplete="off" required />
+      <button type="submit">Send</button>
+    </form>
+  </section>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+      updateProfile, onAuthStateChanged, signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, setDoc, addDoc, query, orderBy, limit,
+      onSnapshot, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyASQSQaHji-gOk0QYKCMM-gynG1F8YPU_o",
+      authDomain: "smartchat-8e648.firebaseapp.com",
+      projectId: "smartchat-8e648",
+      storageBucket: "smartchat-8e648.firebasestorage.app",
+      messagingSenderId: "118257659310",
+      appId: "1:118257659310:web:4931e3c834b6c38f062c3f",
+      measurementId: "G-P7XL9B3DX8"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const $ = (id) => document.getElementById(id);
+    const show = (id) => {
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      $(id).classList.add("active");
+    };
+
+    let signupMode = false;
+    let me = null;
+    let allUsers = [];
+    let unsubUsers = null;
+    let unsubMsgs = null;
+    let currentChatId = null;
+
+    // ---------- AUTH ----------
+    $("toggleAuth").onclick = () => {
+      signupMode = !signupMode;
+      $("nameInput").style.display = signupMode ? "block" : "none";
+      $("nameInput").required = signupMode;
+      $("authBtn").textContent = signupMode ? "Sign up" : "Log in";
+      $("toggleAuth").textContent = signupMode ? "Have an account? Log in" : "No account? Sign up";
+      $("authError").textContent = "";
+    };
+    $("nameInput").style.display = "none";
+
+    $("authForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("authError").textContent = "";
+      const email = $("emailInput").value.trim();
+      const pass = $("passInput").value;
+      try {
+        if (signupMode) {
+          const name = $("nameInput").value.trim();
+          const cred = await createUserWithEmailAndPassword(auth, email, pass);
+          await updateProfile(cred.user, { displayName: name });
+          await setDoc(doc(db, "users", cred.user.uid), {
+            name, email, createdAt: serverTimestamp()
+          });
+          me = { uid: cred.user.uid, name };
+          enterHome();
+        } else {
+          await signInWithEmailAndPassword(auth, email, pass);
+        }
+      } catch (err) {
+        $("authError").textContent = err.message.replace("Firebase: ", "");
+      }
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        me = { uid: user.uid, name: user.displayName || user.email };
+        enterHome();
+      } else {
+        me = null;
+        if (unsubUsers) unsubUsers();
+        if (unsubMsgs) unsubMsgs();
+        show("auth");
+      }
+    });
+
+    $("logoutBtn").onclick = () => signOut(auth);
+
+    // ---------- USER LIST ----------
+    function enterHome() {
+      $("meName").textContent = me.name;
+      show("home");
+      if (unsubUsers) unsubUsers();
+      unsubUsers = onSnapshot(query(collection(db, "users"), orderBy("name")), (snap) => {
+        allUsers = [];
+        snap.forEach(d => { if (d.id !== me.uid) allUsers.push({ uid: d.id, ...d.data() }); });
+        renderUsers();
+      });
+    }
+
+    function renderUsers() {
+      const term = $("search").value.trim().toLowerCase();
+      const list = allUsers.filter(u => (u.name || "").toLowerCase().includes(term));
+      const box = $("users");
+      box.innerHTML = "";
+      if (!list.length) {
+        const d = document.createElement("div");
+        d.className = "empty";
+        d.textContent = allUsers.length ? "No one found." : "No other users yet. Invite a friend to sign up!";
+        box.appendChild(d);
+        return;
+      }
+      list.forEach(u => {
+        const row = document.createElement("div");
+        row.className = "user";
+        const av = document.createElement("div");
+        av.className = "avatar";
+        av.textContent = (u.name || "?").charAt(0).toUpperCase();
+        const info = document.createElement("div");
+        const n = document.createElement("div");
+        n.textContent = u.name;
+        const s = document.createElement("small");
+        s.textContent = u.email;
+        info.append(n, s);
+        row.append(av, info);
+        row.onclick = () => openChat(u);
+        box.appendChild(row);
+      });
+    }
+    $("search").addEventListener("input", renderUsers);
+
+    // ---------- PRIVATE CHAT ----------
+    async function openChat(other) {
+      currentChatId = [me.uid, other.uid].sort().join("_");
+      $("chatWith").textContent = other.name;
+      $("messages").innerHTML = "";
+      show("chat");
+
+      // make sure the chat exists with both participants
+      await setDoc(doc(db, "chats", currentChatId), { participants: [me.uid, other.uid] }, { merge: true });
+
+      if (unsubMsgs) unsubMsgs();
+      const q = query(collection(db, "chats", currentChatId, "messages"), orderBy("createdAt"), limit(200));
+      unsubMsgs = onSnapshot(q, (snap) => {
+        const box = $("messages");
+        box.innerHTML = "";
+        snap.forEach(d => {
+          const m = d.data();
+          const div = document.createElement("div");
+          div.className = "msg" + (m.uid === me.uid ? " me" : "");
+          div.appendChild(document.createTextNode(m.text));
+          const t = document.createElement("time");
+          t.textContent = m.createdAt ? m.createdAt.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "...";
+          div.appendChild(t);
+          box.appendChild(div);
+        });
+        box.scrollTop = box.scrollHeight;
+      });
+    }
+
+    $("backBtn").onclick = () => {
+      if (unsubMsgs) unsubMsgs();
+      unsubMsgs = null;
+      currentChatId = null;
+      show("home");
+    };
+
+    $("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = $("text").value.trim();
+      if (!text || !currentChatId) return;
+      $("text").value = "";
+      await addDoc(collection(db, "chats", currentChatId, "messages"), {
+        text, uid: me.uid, createdAt: serverTimestamp()
+      });
+    });
+  </script>
+</body>
+</html>
